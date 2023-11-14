@@ -1,4 +1,4 @@
-from id import read_id_front, read_id_back
+from id import read_image
 from flask import Flask, render_template, request, url_for
 import os
 import cv2
@@ -15,25 +15,14 @@ if not os.path.exists(UPLOAD_FOLDER_PATH):
 def index():
     return render_template("index.html")
 
-@app.route("/uploadfront", methods=["POST"])
+@app.route("/uploadimage", methods=["POST"])
 def upload_image():
-    if "image" in request.files:
-        image = request.files["image"]
-        if image.filename != "":
-            img_path = os.path.join(UPLOAD_FOLDER_PATH, 'front_id',image.filename)
-            image.save(img_path)
-            osrResult = read_id_front(cv2.imread(img_path))
-            print(osrResult)
-            return {"id":osrResult}
-
-@app.route("/uploadback", methods=["POST"])
-def upload_image_back():
     if "image" in request.files:
         image = request.files["image"]
         if image.filename != "":
            img_path = os.path.join(UPLOAD_FOLDER_PATH, 'back_id',image.filename)
            image.save(img_path)
-           ocrResult = read_id_back(cv2.imread(img_path))
+           ocrResult = read_image(img_path)
            print(ocrResult)
     return {"id":ocrResult}
 

@@ -17,30 +17,18 @@
   </head>
   <body>
     <h1>ID Images Uploading and Recognition By AI</h1>
-    <form method="POST" action="/uploadfront" enctype="multipart/form-data">
+    <form method="POST" action="/uploadimage" enctype="multipart/form-data">
       <label> Front Side Image:</label>
       <input
         type="file"
         name="image"
-        id="image_front"
+        id="image"
         accept="image/*"
         required
       />
-      <input type="submit" value="Upload Front Side" />
+      <input type="submit" value="Upload image" />
     </form>
     <br />
     <br />
     <form method="POST" action="/uploadback" enctype="multipart/form-data">
-      <label>Back Side Image:</label>
-      <input
-        type="file"
-        name="image"
-        id="image_back"
-        accept="image/*"
-        required
-      />
-      <input type="submit" value="Upload Back Side" />
-    </form>
-    <br />
-    <br />
-    <form method="POST" action="/uploadboth" enctype="multipart/form-data">
+      

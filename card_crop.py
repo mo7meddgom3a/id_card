@@ -5,13 +5,11 @@ import math
 from ultralytics import YOLO
 
 # load card segmentation model
-model = YOLO(r'models\card_segmentation.pt')
-
-# Load the Haar Cascade face detection classifier
+card_model = YOLO('./models/card_segmentation.pt')
+id_model = YOLO('./models/id_extract.pt')
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-
-def get_card_vertices(img):
+def get_card_vertices(src, model):
     """
     The function get the vertices of the card in the image ordered in clockwise order.
 
@@ -25,17 +23,22 @@ def get_card_vertices(img):
     
     ordered_corners = None
     
-    results = model(img)
+    results = model(src)
+
+    # print(results)
 
     if results[0].masks is None:
         return ordered_corners
 
     mask = results[0].masks.data[0]
     # Convert to binary for segmentation
-    binary_mask = (mask.cpu().numpy() > 0.5).astype(np.uint8) * 255
+    binary_mask = (mask.numpy() > 0.5).astype(np.uint8) * 255
 
     # Resize the binary mask to match the original image dimensions
-    binary_mask = cv2.resize(binary_mask, (img.shape[1], img.shape[0]))
+    binary_mask = cv2.resize(binary_mask, (src.shape[1], src.shape[0]))
+
+    # add extra area to contour
+    binary_mask = cv2.dilate(binary_mask, np.ones((10, 10), np.uint8), iterations=1)
 
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -65,7 +68,7 @@ def get_card_vertices(img):
     return ordered_corners
 
 
-def crop_card(img, card_vertices, out_size= (840, 530)):
+def crop_vertices(src, vertices, out_size):
     """
     This function crop card in horizontal.
 
@@ -81,38 +84,39 @@ def crop_card(img, card_vertices, out_size= (840, 530)):
         # Calculate the lengths of the four sides of the quadrilateral
     side_lengths = []
     for i in range(4):
-        x1, y1 = card_vertices[i]
-        x2, y2 = card_vertices[(i + 1) % 4]
+        x1, y1 = vertices[i]
+        x2, y2 = vertices[(i + 1) % 4]
         side_length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
         side_lengths.append(side_length)
 
         # Find the index of the longest side
     longest_side_index = side_lengths.index(max(side_lengths))
-
-        # Calculate the slope angle of the longest side
-    x1, y1 = card_vertices[longest_side_index]
-    x2, y2 = card_vertices[(longest_side_index + 1) % 4]
   
-    reordered_vertices = np.roll(card_vertices, -longest_side_index, axis=0)
+    reordered_vertices = np.roll(vertices, -longest_side_index, axis=0)
 
     # Perspective RATIO MODIFYING
 
     dst_corners = np.array([[0, 0], [out_size[0] - 1, 0], [out_size[0] - 1, out_size[1] - 1], [0, out_size[1] - 1]], dtype='float32')
 
-    # Calculate the perspective transform matrix
-    M = cv2.getPerspectiveTransform(reordered_vertices.astype('float32'), dst_corners)
+    try:
 
-    # Apply the perspective transformation
-    result = cv2.warpPerspective(img, M, out_size)
+        # Calculate the perspective transform matrix
+        M = cv2.getPerspectiveTransform(reordered_vertices.astype('float32'), dst_corners)
+
+        # Apply the perspective transformation
+        result = cv2.warpPerspective(src, M, out_size)
+
+        return result
     
-    return result
+    except:
+        return None
 
 
 
 
-def crop_card_front(src):
+def crop_card(src):
     """
-    This function takes image for front side of national id card then return with cropped national id card with fixed size.
+    This function takes image for front or back side of national id card then return with cropped national id card with fixed size.
 
     Parameters:
         src (MatLike): The src image.
@@ -122,99 +126,47 @@ def crop_card_front(src):
     """
 
     # get the coordinates of the quadrilateral card card_vertices
-    card_vertices = get_card_vertices(src)
+    card_vertices = get_card_vertices(src, model= card_model)
     if card_vertices is None:
         return None
 
     # crop card and put it in the standard size
-    card_img = crop_card(src, card_vertices)
+    card_img = crop_vertices(src, card_vertices, out_size= (840, 530))
 
-    # rotate card if needed
+    return card_img
 
-        # Convert the image to grayscale
-    gray = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
-    gray_rotated = cv2.rotate(gray, cv2.ROTATE_180)
 
-        # Detect faces in the grayscale image
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=20, minSize=(30, 30))
-    faces_rotated = face_cascade.detectMultiScale(gray_rotated, scaleFactor=1.1, minNeighbors=20, minSize=(30, 30))
-    
-    if len(faces) > 0 and len(faces_rotated) == 0:
-        return card_img     # Upright faces detected. There may not be inverted faces in the image
-
-    elif len(faces) == 0 and len(faces_rotated) > 0 :
-        return cv2.rotate(card_img, cv2.ROTATE_180)     # Rotate the image by 180 degrees
-    
-    elif len(faces) == 0 and len(faces_rotated) == 0 :
-        return None
-    
-    else:
-        # compare area
-        if faces[0][2]*faces[0][3] >= faces_rotated[0][2]*faces_rotated[0][3]:
-            return card_img
+def crop_id (img):
         
-        else:
-            return cv2.rotate(card_img, cv2.ROTATE_180)
+    # Load the image you want to run detection on
+    image = cv2.imread(img)
+    # image = crop_card(image)
+    # cv2.imshow('Resized Image', image)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    # Perform inference
+    results = id_model(image)
 
+    # The results object is a list with a Results object.
+    result = results[0]
 
+    # Get the bounding box tensor
+    bbox_tensor = result.boxes.xyxy[0]
 
-def crop_card_back(src):
-    """
-    This function takes image for back side of national id card then return with cropped national id card with fixed size.
+    # Check if bbox_tensor is indeed a 1D tensor with four values
+    if bbox_tensor.ndim == 1 and bbox_tensor.shape[0] == 4:
+        x1, y1, x2, y2 = bbox_tensor.cpu().numpy()  # Unpack the bounding box coordinates
 
-     Parameters:
-        src (MatLike): The src image.
+        # Crop the image within the bounding box
+        cropped_image = image[int(y1):int(y2), int(x1):int(x2)]
+
+        # Display the resized image
         
-    Returns:
-        card (MatLike) : The cropped card image, in case of there is no card the output will be (None).    
-    """
-
-    # get the coordinates of the quadrilateral card card_vertices
-    card_vertices = get_card_vertices(src)
-    if card_vertices is None:
-        return None
-
-    # crop card and put it in the standard size
-    card_img = crop_card(src, card_vertices)
-
-    
-
-    # rotate if needed
-
-    #********** detect barcode pos ***********
-
-    # Convert the image to grayscale
-    gray = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
-    # Threshold the image to create a binary mask of black pixels
-    mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 2)
-    # Invert the binary image
-    mask = cv2.bitwise_not(mask)
-    # Define a kernel (structuring element) for erosion
-    kernel = np.ones((3, 3), np.uint8)
-    # Perform erosion on the image
-    mask = cv2.erode(mask, kernel, iterations=1)
-    mask = cv2.dilate(mask, kernel, iterations=5)
-
-    # Find contours
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Assuming the largest contour is the ID card
-    barcode_contour = max(contours, key=cv2.contourArea)
-
-    # Calculate the moments of the contour to find its centroid
-    M = cv2.moments(barcode_contour)
-    
-    cy = 0
-
-    if M["m00"] != 0:
-        # Calculate the centroid coordinates (cx, cy)
-        # cx = int(M["m10"] / M["m00"])
-        cy = int(M["m01"] / M["m00"])
-
-    if cy >= card_img.shape[0]/2:
-        return card_img
-    
+        return cropped_image
     else:
-        return cv2.rotate(card_img, cv2.ROTATE_180)     # Rotate the image by 180 degrees
+        print("Unexpected bbox_tensor dimensions:", bbox_tensor.shape)
+
+
+
 
 
